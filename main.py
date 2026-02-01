@@ -2,115 +2,155 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
-# Page config
-st.set_page_config(layout="wide")
-
-# Load data
+# -------------------------------------------------
+# CONFIGURATION
+# -------------------------------------------------
 DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
+st.set_page_config(page_title="Height‑Weight AutoML Dashboard", layout="wide")
+
+# -------------------------------------------------
+# DATA LOADING & CLEANING
+# -------------------------------------------------
 @st.cache_data
-def load_data(url):
+def load_data(url: str) -> pd.DataFrame:
     df = pd.read_csv(url)
-    # Safe snake_case cleaning
-    df.columns = ["_".join("".join(c if c.isalnum() else " " for c in col).lower().split()) for col in df.columns]
+    # Safe snake_case cleaning (no regex)
+    cleaned = []
+    for col in df.columns:
+        # replace non‑alphanumeric with space, lower, split, join with underscore
+        safe = "_".join("".join(c if c.isalnum() else " " for c in col).lower().split())
+        cleaned.append(safe)
+    df.columns = cleaned
     return df
 
 df = load_data(DATA_URL)
 
-# Dynamic column groups
-num_cols = df.select_dtypes(include=np.number).columns.tolist()
-cat_cols = df.select_dtypes(include='object').columns.tolist()
+# -------------------------------------------------
+# INJECTED AUTOML RESULTS
+# -------------------------------------------------
+AUTOML_REPORT = {
+    "winner": "Ridge Regression",
+    "best_score": 0.1627,
+    "leaderboard": [
+        {"Model": "Random Forest", "MAE": 10.4121, "Params": "{'model__max_depth': 10, 'model__n_estimators': 100}", "Score": -0.141},
+        {"Model": "Gradient Boosting", "MAE": 9.1252, "Params": "{'model__learning_rate': 0.01, 'model__n_estimators': 100}", "Score": 0.0781},
+        {"Model": "Ridge Regression", "MAE": 8.7351, "Params": "{}", "Score": 0.1627}
+    ],
+    "top_features": [
+        {"feature": "height_inches", "importance": 1.0}
+    ],
+    "verdict": "Ridge Regression emerged as the top performer with an MAE of 8.74, achieving the highest score (0.1627) among the tested models. While ensemble methods like Gradient Boosting and Random Forest offered competitive error rates, the linear nature of the relationship between height and weight allowed Ridge Regression to capture the pattern efficiently with minimal over‑fitting. The modest improvement over the tree‑based models suggests that the dataset is relatively clean and low‑dimensional, making regularized linear regression the optimal choice for this height‑to‑weight prediction task."
+}
 
-st.title("Universal Data Dashboard")
+# -------------------------------------------------
+# NARRATIVE INTELLIGENCE CLASS
+# -------------------------------------------------
+class NarrativeIntelligence:
+    @staticmethod
+    def profile_data(df: pd.DataFrame) -> pd.DataFrame:
+        return df.describe().transpose()
 
-# Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📋 Profiling", "🛠️ Feature Engineering", "📊 Distributions", "🔗 Correlations", "🧬 PCA", "🧩 Clustering", "🤖 AutoML"])
+    @staticmethod
+    def missing_summary(df: pd.DataFrame) -> pd.Series:
+        return df.isnull().sum()
 
+    @staticmethod
+    def analyze_distribution(df: pd.DataFrame, column: str):
+        fig = px.histogram(df, x=column, nbins=30, title=f"Distribution of {column}")
+        return fig
+
+# -------------------------------------------------
+# LAYOUT WITH TABS
+# -------------------------------------------------
+st.title("📊 Height‑Weight AutoML Dashboard")
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📄 Data Overview",
+    "📈 Histograms",
+    "📊 Correlations",
+    "🔎 PCA",
+    "🧩 Clustering",
+    "⚙️ Settings",
+    "🏆 AutoML Report"
+])
+
+# ---------- Tab 1: Data Overview ----------
 with tab1:
-    st.header("Data Profiling")
-    st.subheader("Head of dataset")
+    st.subheader("Raw Data")
     st.dataframe(df.head())
-    st.subheader("Summary statistics")
-    st.dataframe(df.describe())
-    st.subheader("Missing values")
-    missing = df.isnull().sum()
-    st.dataframe(missing[missing>0])
+    st.subheader("Statistical Profile")
+    profile = NarrativeIntelligence.profile_data(df)
+    st.dataframe(profile)
+    st.subheader("Missing Values")
+    st.write(NarrativeIntelligence.missing_summary(df))
 
+# ---------- Tab 2: Histograms ----------
 with tab2:
-    st.header("Feature Engineering")
-    if num_cols:
-        col = st.selectbox("Choose Column to Transform", num_cols)
-        fig = px.histogram(df, x=col, nbins=30, title=f"Histogram of {col}")
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.write("No numeric columns available for transformation.")
+    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+    selected = st.selectbox("Select column for histogram", numeric_cols, index=0)
+    fig = NarrativeIntelligence.analyze_distribution(df, selected)
+    st.plotly_chart(fig, use_container_width=True)
 
+# ---------- Tab 3: Correlations ----------
 with tab3:
-    st.header("Distributions (Violin Plots)")
-    if num_cols:
-        cols_to_show = num_cols[:6]
-        for c in cols_to_show:
-            fig = px.violin(df, y=c, box=True, points="all", title=f"Violin plot of {c}")
-            st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.write("No numeric columns to display.")
+    st.subheader("Correlation Matrix")
+    corr = df.corr()
+    fig = px.imshow(corr, text_auto=True, aspect="auto", title="Correlation Heatmap")
+    st.plotly_chart(fig, use_container_width=True)
 
+# ---------- Tab 4: PCA ----------
 with tab4:
-    st.header("Correlation Heatmap")
-    if len(num_cols) > 1:
-        corr = df[num_cols].corr()
-        fig = go.Figure(data=go.Heatmap(z=corr.values, x=corr.columns, y=corr.index, colorscale='Viridis'))
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.write("Not enough numeric columns for correlation heatmap.")
-
-with tab5:
-    st.header("PCA Scatter")
-    if len(num_cols) > 1:
-        scaler = StandardScaler()
-        scaled = scaler.fit_transform(df[num_cols])
+    st.subheader("PCA Projection (2 Components)")
+    numeric_df = df.select_dtypes(include=np.number).dropna(axis=1)
+    if numeric_df.shape[1] >= 2:
         pca = PCA(n_components=2)
-        components = pca.fit_transform(scaled)
+        components = pca.fit_transform(numeric_df)
         pca_df = pd.DataFrame(components, columns=["PC1", "PC2"])
-        fig = px.scatter(pca_df, x="PC1", y="PC2", title="PCA 2D Scatter")
+        fig = px.scatter(pca_df, x="PC1", y="PC2", title="PCA Scatter")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.write("Insufficient numeric columns for PCA.")
+        st.warning("Not enough numeric columns for PCA.")
 
-with tab6:
-    st.header("K-Means Clustering")
-    if len(num_cols) > 1:
-        k = st.slider("Select number of clusters", 2, 10, 3)
-        scaler = StandardScaler()
-        scaled = scaler.fit_transform(df[num_cols])
+# ---------- Tab 5: Clustering ----------
+with tab5:
+    st.subheader("K‑Means Clustering")
+    numeric_df = df.select_dtypes(include=np.number).dropna(axis=1)
+    k = st.slider("Number of clusters", 2, 6, 3)
+    if numeric_df.shape[0] > 0:
         kmeans = KMeans(n_clusters=k, random_state=42)
-        clusters = kmeans.fit_predict(scaled)
-        df_cluster = df.copy()
-        df_cluster["cluster"] = clusters
-        fig = px.scatter_matrix(df_cluster, dimensions=num_cols[:5], color="cluster", title="Cluster Scatter Matrix")
+        clusters = kmeans.fit_predict(numeric_df)
+        df_clust = numeric_df.copy()
+        df_clust["cluster"] = clusters
+        fig = px.scatter_matrix(df_clust, dimensions=numeric_df.columns.tolist(), color="cluster", title="Cluster Scatter Matrix")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.write("Not enough numeric columns for clustering.")
+        st.warning("Dataset is empty.")
 
+# ---------- Tab 6: Settings ----------
+with tab6:
+    st.subheader("Dataset Settings")
+    st.write("You can adjust the data source URL below and reload the data.")
+    new_url = st.text_input("Dataset URL", DATA_URL)
+    if st.button("Reload Data"):
+        st.experimental_rerun()
+
+# ---------- Tab 7: AutoML Report ----------
 with tab7:
-    st.header("AutoML Tournament")
-    target = st.selectbox("Select Target", df.columns)
-    if st.button("Run AutoML"):
-        with st.spinner("Running AutoML tournament..."):
-            # Simple wrapper calling the backend AutoML function
-            import json, requests
-            payload = {
-                "dataset_url": DATA_URL,
-                "target_column": target,
-                "task_type": "regression" if np.issubdtype(df[target].dtype, np.number) else "classification",
-                "tune_hyperparameters": False
-            }
-            # Assume existence of an endpoint; placeholder response
-            st.success(f"AutoML completed. (Mock) Best model: Ridge Regression with score {0.1627:.4f}")
-            st.json({"best_model": "Ridge Regression", "score": 0.1627})
+    st.subheader("🏆 Champion Model")
+    st.metric(label="Winner", value=AUTOML_REPORT["winner"], delta=f"Score: {AUTOML_REPORT['best_score']:.4f}")
 
-st.caption("Generated by BlazeWatson – universal dashboard template.")
+    st.subheader("📊 Leaderboard")
+    leaderboard_df = pd.DataFrame(AUTOML_REPORT["leaderboard"])
+    st.dataframe(leaderboard_df)
+
+    st.subheader("🔝 Top Feature Importance")
+    top_feat = pd.DataFrame(AUTOML_REPORT["top_features"])
+    fig_feat = px.bar(top_feat, x="feature", y="importance", title="Feature Importance")
+    st.plotly_chart(fig_feat, use_container_width=True)
+
+    st.subheader("📝 Verdict")
+    st.write(AUTOML_REPORT["verdict"])
+
+# End of app
