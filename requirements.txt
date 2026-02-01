@@ -1,5 +1,5 @@
 streamlit
 pandas
-seaborn
-matplotlib
-ibm-watsonx-ai
+numpy
+plotly
+scikit-learn
