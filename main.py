@@ -4,65 +4,73 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from ibm_watsonx_ai.foundation_models import ModelInference
 
-DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
-
+# Page config
 st.set_page_config(layout="wide")
 
+# Load data
+DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
 @st.cache_data
 def load_data(url):
-    df = pd.read_csv(url)
-    # Aggressive sanitization: Keep only letters, numbers, and underscores
-    df.columns = [
-        "".join(c for c in col if c.isalnum() or c == " ").strip().replace(" ", "_").lower()
-        for col in df.columns
-    ]
-    return df
+    return pd.read_csv(url)
 
 df = load_data(DATA_URL)
 
-# Sidebar for navigation
-tab = st.sidebar.selectbox("Select Tab", ["📊 Dashboard", "🧠 Analyst"])
+# Column sanitization (mandatory)
+df.columns = [
+    "".join(c for c in col if c.isalnum() or c == " ").strip().replace(" ", "_").lower()
+    for col in df.columns
+]
 
-if tab == "📊 Dashboard":
-    st.title("📊 Data Dashboard")
+# DATA_SUMMARY injected for the analyst chat
+DATA_SUMMARY = "Columns: Index, Height(Inches), Weight(Pounds). Target: Weight(Pounds). Rows: 200."
+
+# Tabs
+tab_dashboard, tab_analyst = st.tabs(["📊 Dashboard", "🧠 Analyst"])
+
+with tab_dashboard:
+    st.header("Exploratory Data Analysis")
     numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-    st.subheader("Data Overview")
-    st.dataframe(df)
-
-    if len(numeric_cols) >= 2:
+    if numeric_cols:
+        # Scatter matrix
         st.subheader("Scatter Matrix")
         fig = sns.pairplot(df[numeric_cols])
         st.pyplot(fig)
-
+        # Correlation heatmap
         st.subheader("Correlation Heatmap")
         corr = df[numeric_cols].corr()
         fig2, ax = plt.subplots()
         sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax)
         st.pyplot(fig2)
     else:
-        st.write("Not enough numeric columns for visualizations.")
+        st.write("No numeric columns detected.")
 
-elif tab == "🧠 Analyst":
-    st.title("🧠 Watsonx Analyst")
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
-    # System prompt with data summary
-    system_prompt = "You are an analyst assistant. Use the following data summary to answer questions. Columns: Index, Height(Inches), Weight(Pounds). Target: Weight(Pounds). Rows: ~50+."
-    user_input = st.text_input("Ask a question about the data:")
-    if st.button("Send") and user_input:
-        st.session_state.chat_history.append({"role": "user", "content": user_input})
-        # Initialize model inference (placeholder – credentials to be set in Streamlit secrets)
+with tab_analyst:
+    st.header("AI Analyst")
+    # Initialize session state for chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    # Display chat messages
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
+    # User input
+    if prompt := st.chat_input("Ask a question about the data..."):
+        # Append user message
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        # Prepare system prompt with data summary
+        system_prompt = f"You are an AI data analyst. Use the following data summary to answer questions. {DATA_SUMMARY}"
+        # Initialize Watsonx model (placeholder model name)
         model = ModelInference(
-            model_id="meta-llama/llama-2-70b-chat",
+            model_id="google/flan-t5-xl",
             params={"decoding_method": "greedy", "max_new_tokens": 200},
-            credentials={"url": "https://eu-gb.ml.cloud.ibm.com", "apikey": st.secrets["watsonx"]["apikey"]}
+            project_id=st.secrets.get("IBM_PROJECT_ID"),
+            api_key=st.secrets.get("IBM_API_KEY"),
+            url="https://eu-gb.ml.cloud.ibm.com"
         )
-        response = model.generate(
-            prompt=system_prompt + "\nUser: " + user_input + "\nAssistant:",
-            max_new_tokens=200,
-        )
-        assistant_msg = response.get("generated_text", "")
-        st.session_state.chat_history.append({"role": "assistant", "content": assistant_msg})
-    for msg in st.session_state.chat_history:
-        role = "You" if msg["role"] == "user" else "Assistant"
-        st.write(f"**{role}:** {msg["content"]}")
+        # Perform inference
+        response = model.generate(prompt, system_prompt=system_prompt)
+        answer = response.get("generated_text", "[No response]")
+        # Append assistant message
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+        # Display assistant message
+        with st.chat_message("assistant"):
+            st.write(answer)
