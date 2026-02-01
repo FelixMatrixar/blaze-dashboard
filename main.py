@@ -2,63 +2,59 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Load data
+# Load dataset
 DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
 @st.cache_data
 def load_data():
     df = pd.read_csv(DATA_URL)
     # Clean column names
-    df.columns = [c.strip().replace('"', '').replace(' ', '_').lower() for c in df.columns]
+    df.columns = [c.strip().replace('"', '').replace(' ', '_') for c in df.columns]
     return df
 
 df = load_data()
 
-# AutoML report
+# AutoML Report
 AUTOML_REPORT = {
     "winner": "Ridge",
     "primary_score": 0.1627,
-    "detailed_metrics": "MSE: 133.5091, R2: 0.1627",
+    "detailed_metrics": "MSE: 133.51, R2: 0.1627",
     "leaderboard": [
-        {"model": "Ridge", "R2": 0.1627, "MSE": 133.5091},
-        {"model": "Random Forest", "R2": -0.1101, "MSE": 177.0031},
-        {"model": "Gradient Boosting", "R2": -0.1555, "MSE": 184.2448}
+        {"Model": "Ridge", "R2": 0.1627, "MSE": 133.51},
+        {"Model": "Random Forest", "R2": -0.1101, "MSE": 177.00},
+        {"Model": "Gradient Boosting", "R2": -0.1555, "MSE": 184.24}
     ],
-    "tuning_status": "not performed",
+    "tuning_status": "Not performed",
     "best_params": "N/A",
-    "verdict": "Ridge regression achieved the highest R² (0.16) among tested models, indicating a modest linear relationship between height and weight."
+    "verdict": "Ridge regression provides the best R² score among tested models, though overall predictive power is modest."
 }
 
-# Narrative Intelligence
 class NarrativeIntelligence:
     @staticmethod
-    def interpret_histogram(col, data):
-        series = data[col]
-        skew = series.skew()
-        if skew > 0.5:
-            return f"The {col} distribution is right‑skewed (skew={skew:.2f})."
-        elif skew < -0.5:
-            return f"The {col} distribution is left‑skewed (skew={skew:.2f})."
-        else:
-            return f"The {col} distribution is fairly symmetric (skew={skew:.2f})."
+    def interpret_histogram(col, df):
+        desc = df[col].describe()
+        skew = df[col].skew()
+        direction = "right" if skew > 0 else "left" if skew < 0 else "approximately symmetric"
+        return f"The distribution of {col} is {direction} skewed (skew={skew:.2f})."
     @staticmethod
     def interpret_correlation(df):
-        corr = df.corr()
-        height_weight = corr.loc['height_inches', 'weight_pounds']
-        if abs(height_weight) > 0.7:
+        corr = df.corr().iloc[0,1]
+        if abs(corr) > 0.7:
             strength = "strong"
-        elif abs(height_weight) > 0.4:
+        elif abs(corr) > 0.4:
             strength = "moderate"
         else:
             strength = "weak"
-        direction = "positive" if height_weight > 0 else "negative"
-        return f"There is a {strength} {direction} correlation ({height_weight:.2f}) between height_inches and weight_pounds."
+        return f"Correlation between Height_Inches and Weight_Pounds is {strength} (r={corr:.2f})."
     @staticmethod
     def interpret_pca(explained_variance):
         total = sum(explained_variance[:2]) * 100
-        return f"The first two PCA components explain {total:.1f}% of the variance."
+        return f"First two PCA components explain {total:.1f}% of variance."
 
-# App layout – 7 tabs
-st.set_page_config(page_title="HW 200 AutoML Dashboard", layout="wide")
+st.set_page_config(layout="wide", page_title="AutoML Dashboard")
+
+st.title("📊 AutoML Dashboard for Height‑Weight Data")
+
+# Tabs
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Data Overview",
     "Height Distribution",
@@ -70,50 +66,48 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 ])
 
 with tab1:
-    st.header("Dataset Preview")
-    st.dataframe(df.head())
-    st.info(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
+    st.subheader("Raw Data")
+    st.dataframe(df)
 
 with tab2:
-    st.header("Height (inches) Distribution")
-    fig = px.histogram(df, x="height_inches", nbins=30, title="Height Histogram")
-    st.plotly_chart(fig)
-    st.info(NarrativeIntelligence.interpret_histogram("height_inches", df))
+    fig = px.histogram(df, x="Height_Inches", nbins=20, title="Height Distribution")
+    st.plotly_chart(fig, use_container_width=True)
+    st.info(NarrativeIntelligence.interpret_histogram("Height_Inches", df))
 
 with tab3:
-    st.header("Weight (pounds) Distribution")
-    fig = px.histogram(df, x="weight_pounds", nbins=30, title="Weight Histogram")
-    st.plotly_chart(fig)
-    st.info(NarrativeIntelligence.interpret_histogram("weight_pounds", df))
+    fig = px.histogram(df, x="Weight_Pounds", nbins=20, title="Weight Distribution")
+    st.plotly_chart(fig, use_container_width=True)
+    st.info(NarrativeIntelligence.interpret_histogram("Weight_Pounds", df))
 
 with tab4:
-    st.header("Height vs Weight Scatter")
-    fig = px.scatter(df, x="height_inches", y="weight_pounds", trendline="ols", title="Height vs Weight")
-    st.plotly_chart(fig)
+    fig = px.scatter(df, x="Height_Inches", y="Weight_Pounds", trendline="ols", title="Height vs Weight")
+    st.plotly_chart(fig, use_container_width=True)
     st.info(NarrativeIntelligence.interpret_correlation(df))
 
 with tab5:
-    st.header("Correlation Matrix")
     corr = df.corr()
-    fig = px.imshow(corr, text_auto=True, title="Correlation Heatmap")
-    st.plotly_chart(fig)
+    fig = px.imshow(corr, text_auto=True, aspect="auto", title="Correlation Matrix")
+    st.plotly_chart(fig, use_container_width=True)
     st.info(NarrativeIntelligence.interpret_correlation(df))
 
 with tab6:
-    st.header("PCA Insight")
     from sklearn.decomposition import PCA
-    pca = PCA()
-    pca.fit(df[["height_inches", "weight_pounds"]])
-    expl = pca.explained_variance_ratio_
-    fig = px.bar(x=[f"PC{i+1}" for i in range(len(expl))], y=expl, labels={"x":"Component", "y":"Explained Variance"}, title="PCA Explained Variance")
-    st.plotly_chart(fig)
-    st.info(NarrativeIntelligence.interpret_pca(expl))
+    pca = PCA(n_components=2)
+    components = pca.fit_transform(df[["Height_Inches", "Weight_Pounds"]])
+    explained = pca.explained_variance_ratio_
+    fig = px.scatter(x=components[:,0], y=components[:,1], title="PCA Scatter (2 components)")
+    st.plotly_chart(fig, use_container_width=True)
+    st.info(NarrativeIntelligence.interpret_pca(explained))
 
 with tab7:
-    st.header("🏆 AutoML Report")
-    st.subheader("Winner Model")
-    st.metric(label="Model", value=AUTOML_REPORT["winner"], delta=f"R²={AUTOML_REPORT['primary_score']:.3f}")
-    st.write(AUTOML_REPORT["verdict"])
-    st.subheader("Full Leaderboard")
+    st.subheader("🏆 AutoML Report")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric(label="Winner Model", value=AUTOML_REPORT["winner"])
+    with col2:
+        st.metric(label="Primary R² Score", value=AUTOML_REPORT["primary_score"])
+    st.markdown(f"**Verdict:** {AUTOML_REPORT['verdict']}")
+    st.markdown("### Full Leaderboard")
     st.dataframe(pd.DataFrame(AUTOML_REPORT["leaderboard"]))
-    st.caption("Tuning status: " + AUTOML_REPORT["tuning_status"])
+
+# End of dashboard
