@@ -1,5 +1,5 @@
 streamlit
 pandas
-seaborn
 matplotlib
+seaborn
 ibm-watsonx-ai
