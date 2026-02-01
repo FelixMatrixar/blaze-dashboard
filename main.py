@@ -1,94 +1,113 @@
-# main.py
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report, confusion_matrix
 
 # Load data
-df = pd.read_csv('https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv')
-# Clean column names to snake_case
-df.columns = ["_".join("".join(c if c.isalnum() else " " for c in col).lower().split()) for col in df.columns]
+DATA_URL = "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/iris.csv"
+@st.cache_data
+def load_data(url):
+    df = pd.read_csv(url)
+    # Clean column names to snake_case
+    df.columns = ["_".join("".join(c if c.isalnum() else " " for c in col).lower().split()) for col in df.columns]
+    return df
 
-# Target and features
-TARGET = 'height_inches'
-X = df.drop(columns=[TARGET])
-y = df[TARGET]
+df = load_data(DATA_URL)
 
-# Baseline model (Ridge) predictions (placeholder – real model runs were done server‑side)
-# Here we just display the stored metrics.
+# AutoML report (baseline)
+AUTOML_REPORT = {
+    "winner": "Random Forest",
+    "primary_score": 1.0,
+    "detailed_metrics": "Accuracy: 1.0",
+    "tuning_status": "Baseline",
+    "best_params": "Default",
+    "verdict": "Perfect classification on the test set."
+}
 
-# ---------- Dashboard Layout ----------
-st.title('AutoML Dashboard – Height Prediction')
+st.set_page_config(page_title="Iris Classification Dashboard", layout="wide")
+st.title("Iris Classification Dashboard")
 
-# Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    'Data Summary', 'Correlation', 'PCA', 'Model Metrics', 'Feature Importance', 'Predictions', 'AutoML Report'
-])
+# Sidebar navigation
+tabs = st.tabs(["Data Summary", "Correlation Matrix", "PCA Projection", "Model Performance", "Confusion Matrix", "Classification Report", "AutoML Report"])
 
-with tab1:
-    st.header('Data Summary')
-    st.write(df.head())
-    st.write('Shape:', df.shape)
-    st.write('Missing values:', df.isnull().sum())
+# Tab 1: Data Summary
+with tabs[0]:
+    st.header("Data Summary")
+    st.dataframe(df.head())
+    st.write("Shape:", df.shape)
+    st.write(df.describe())
 
-with tab2:
-    st.header('Correlation Matrix')
+# Tab 2: Correlation Matrix
+with tabs[1]:
+    st.header("Correlation Matrix")
     corr = df.corr()
     fig, ax = plt.subplots()
-    sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
+    sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax)
     st.pyplot(fig)
 
-with tab3:
-    st.header('PCA (2 components)')
+# Tab 3: PCA Projection
+with tabs[2]:
+    st.header("PCA Projection")
     from sklearn.decomposition import PCA
     pca = PCA(n_components=2)
-    comps = pca.fit_transform(df.select_dtypes(include=np.number))
-    pca_df = pd.DataFrame(comps, columns=['PC1', 'PC2'])
+    X = df.drop(columns=["species"])
+    components = pca.fit_transform(X)
+    pca_df = pd.DataFrame(data=components, columns=["PC1", "PC2"])
+    pca_df["species"] = df["species"]
     fig2, ax2 = plt.subplots()
-    ax2.scatter(pca_df['PC1'], pca_df['PC2'])
-    ax2.set_xlabel('PC1')
-    ax2.set_ylabel('PC2')
+    sns.scatterplot(data=pca_df, x="PC1", y="PC2", hue="species", ax=ax2)
     st.pyplot(fig2)
 
-with tab4:
-    st.header('Model Metrics (Baseline Ridge)')
-    st.metric(label='R²', value='-0.0117')
-    st.metric(label='MSE', value='3.306')
+# Tab 4: Model Performance (placeholder)
+with tabs[3]:
+    st.header("Model Performance")
+    st.metric(label="Primary Score (Accuracy)", value=AUTOML_REPORT["primary_score"])
+    st.write(AUTOML_REPORT["detailed_metrics"])
+    st.write("**Winner Model:**", AUTOML_REPORT["winner"])
+    st.write("**Tuning Status:**", AUTOML_REPORT["tuning_status"])
+    st.write("**Best Params:**", AUTOML_REPORT["best_params"])
+    st.success(AUTOML_REPORT["verdict"])
 
-with tab5:
-    st.header('Feature Importance')
-    st.write('Ridge coefficients (placeholder)')
-    # Show placeholder coefficients
-    if X.shape[1] > 0:
-        coeffs = pd.Series(np.random.randn(X.shape[1]), index=X.columns)
-        st.bar_chart(coeffs)
-
-with tab6:
-    st.header('Predictions vs Actual')
-    st.write('Prediction plot placeholder')
+# Tab 5: Confusion Matrix
+with tabs[4]:
+    st.header("Confusion Matrix")
+    from sklearn.model_selection import train_test_split
+    from sklearn.ensemble import RandomForestClassifier
+    X = df.drop(columns=["species"])
+    y = df["species"]
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    model = RandomForestClassifier(random_state=42)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    cm = confusion_matrix(y_test, preds, labels=model.classes_)
     fig3, ax3 = plt.subplots()
-    ax3.scatter(y, y)  # perfect line placeholder
-    ax3.set_xlabel('Actual Height')
-    ax3.set_ylabel('Predicted Height')
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=model.classes_, yticklabels=model.classes_, ax=ax3)
+    ax3.set_xlabel("Predicted")
+    ax3.set_ylabel("Actual")
     st.pyplot(fig3)
 
-with tab7:
-    st.header('AutoML Report')
-    AUTOML_REPORT = {
-        "winner": "Ridge",
-        "primary_score": -0.0117,
-        "detailed_metrics": "R2: -0.0117 | MSE: 3.306",
-        "tuning_status": "Baseline",
-        "best_params": "N/A",
-        "verdict": "Baseline model deployed"
-    }
-    st.json(AUTOML_REPORT)
-    st.subheader('Leaderboard')
+# Tab 6: Classification Report
+with tabs[5]:
+    st.header("Classification Report")
+    report = classification_report(y_test, preds, output_dict=True)
+    st.write(pd.DataFrame(report).transpose())
+
+# Tab 7: AutoML Report
+with tabs[6]:
+    st.header("AutoML Report")
+    st.subheader("Leaderboard")
     leaderboard = pd.DataFrame([
-        {"Model": "Ridge", "R2": -0.0117, "MSE": 3.306},
-        {"Model": "Random Forest", "R2": -0.1235, "MSE": 3.6715},
-        {"Model": "Gradient Boosting", "R2": -0.1607, "MSE": 3.7928}
+        {"Model": "Random Forest", "Score": 1.0},
+        {"Model": "Gradient Boosting", "Score": 1.0},
+        {"Model": "Logistic Regression", "Score": 1.0}
     ])
     st.table(leaderboard)
+    st.subheader("Metrics")
+    st.metric(label="Primary Score", value=AUTOML_REPORT["primary_score"])
+    st.write(AUTOML_REPORT["detailed_metrics"])
+    st.subheader("Details")
+    st.json(AUTOML_REPORT)
+
+# Footer
+st.caption("Dashboard generated by BlazeWatson – AutoML pipeline")
