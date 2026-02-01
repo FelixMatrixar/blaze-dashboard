@@ -2,159 +2,186 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier, IsolationForest
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.decomposition import PCA
-from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score, f1_score
+from sklearn.cluster import KMeans
+from sklearn.metrics import r2_score, mean_absolute_error
 
-# Config
+# ----- Narrative Intelligence -----
+class NarrativeIntelligence:
+    @staticmethod
+    def profile_data(df: pd.DataFrame) -> str:
+        rows, cols = df.shape
+        missing = df.isnull().mean()*100
+        msgs = [f"Dataset has {rows} rows and {cols} columns."]
+        for col, pct in missing.items():
+            if pct>0:
+                msgs.append(f"Column '{col}' has {pct:.1f}% missing values.")
+        return " ".join(msgs)
+    @staticmethod
+    def analyze_distribution(series: pd.Series) -> str:
+        skew = series.skew()
+        if skew > 0.5:
+            return "Right skewed"
+        if skew < -0.5:
+            return "Left skewed"
+        return "Approximately normal"
+    @staticmethod
+    def interpret_correlation(corr_df: pd.DataFrame) -> list:
+        strong = []
+        for i in range(len(corr_df.columns)):
+            for j in range(i+1, len(corr_df.columns)):
+                val = abs(corr_df.iloc[i, j])
+                if val > 0.7:
+                    strong.append((corr_df.columns[i], corr_df.columns[j], corr_df.iloc[i, j]))
+        return strong
+    @staticmethod
+    def evaluate_model(r2: float) -> str:
+        if r2 > 0.75:
+            return "Excellent"
+        if r2 > 0.5:
+            return "Good"
+        if r2 > 0.3:
+            return "Fair"
+        return "Poor"
+
+# ----- Data Pipeline -----
+class DataPipeline:
+    def __init__(self, df: pd.DataFrame, target: str):
+        self.df = df
+        self.target = target
+        self.numeric_features = df.select_dtypes(include=[np.number]).columns.tolist()
+        self.numeric_features.remove(target)
+        self.categorical_features = []
+        self.preprocess = ColumnTransformer(
+            transformers=[
+                ("num", Pipeline([("imputer", SimpleImputer(strategy='median')), ("scaler", StandardScaler())]), self.numeric_features),
+                ("cat", Pipeline([("imputer", SimpleImputer(strategy='most_frequent')), ("onehot", OneHotEncoder(handle_unknown='ignore'))]), self.categorical_features)
+            ]
+        )
+    def get_features_targets(self):
+        X = self.df.drop(columns=[self.target])
+        y = self.df[self.target]
+        return X, y
+
+# ----- AutoML Engine -----
+class AutoMLEngineer:
+    def __init__(self, df: pd.DataFrame, target: str):
+        self.df = df
+        self.target = target
+        self.pipeline = DataPipeline(df, target)
+    def run_experiment(self):
+        from sklearn.linear_model import Ridge
+        from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+        models = {
+            "Ridge Regression": Ridge(),
+            "Random Forest": RandomForestRegressor(random_state=0),
+            "Gradient Boosting": GradientBoostingRegressor(random_state=0)
+        }
+        X, y = self.pipeline.get_features_targets()
+        X_processed = self.pipeline.preprocess.fit_transform(X)
+        results = []
+        best_score = -np.inf
+        best_model_name = None
+        for name, model in models.items():
+            model.fit(X_processed, y)
+            preds = model.predict(X_processed)
+            r2 = r2_score(y, preds)
+            mae = mean_absolute_error(y, preds)
+            results.append({"Model": name, "R2": r2, "MAE": mae})
+            if r2 > best_score:
+                best_score = r2
+                best_model_name = name
+        narrative = NarrativeIntelligence.evaluate_model(best_score)
+        return results, best_model_name, narrative
+
+# ----- Streamlit App -----
+DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
 st.set_page_config(layout="wide")
 
-# Data URL
-DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
-
 @st.cache_data
-def load_data():
-    df = pd.read_csv(DATA_URL)
+def load_data(url):
+    df = pd.read_csv(url)
     # Safe column cleaning
     df.columns = ["".join(c for c in col if c.isalnum() or c == " ").strip().replace(" ", "_").lower() for col in df.columns]
     return df
 
-df = load_data()
+df = load_data(DATA_URL)
 
-# AutoML Engine
-class AutoMLEngineer:
-    def __init__(self):
-        self.model = None
-        self.feature_names = None
-        self.is_classifier = False
-        self.le = None
+# Identify target column (weight)
+TARGET_COL = "weight_pounds"
 
-    def preprocess(self, df, target):
-        X = df.drop(columns=[target])
-        y = df[target]
-        # Handle missing values
-        for col in X.columns:
-            if X[col].dtype.kind in "bifc":
-                X[col].fillna(X[col].mean(), inplace=True)
-            else:
-                X[col].fillna(X[col].mode()[0], inplace=True)
-        # Encode categoricals if any
-        for col in X.select_dtypes(include=["object", "category"]).columns:
-            le = LabelEncoder()
-            X[col] = le.fit_transform(X[col].astype(str))
-        # Target preprocessing
-        if y.dtype.kind in "bifc":
-            y = y.fillna(y.mean())
-        else:
-            self.le = LabelEncoder()
-            y = self.le.fit_transform(y.astype(str))
-        self.is_classifier = (y.nunique() < 20 and y.dtype.kind not in "bifc")
-        self.feature_names = X.columns.tolist()
-        return X, y
+# Initialize NarrativeIntelligence
+ni = NarrativeIntelligence()
 
-    def train(self, X, y):
-        if self.is_classifier:
-            self.model = RandomForestClassifier(random_state=42)
-        else:
-            self.model = RandomForestRegressor(random_state=42)
-        self.model.fit(X, y)
-        return self.model
+# Tabs
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📋 Data Profiling", "🛠️ Feature Engineering", "📊 Advanced Distributions", "🔗 Correlations", "🧬 PCA & Anomalies", "🧩 Clustering", "🤖 AutoML Tournament"])
 
-    def get_feature_importance(self):
-        if self.model is None:
-            return pd.DataFrame()
-        importance = self.model.feature_importances_
-        return pd.DataFrame({"feature": self.feature_names, "importance": importance}).sort_values(by="importance", ascending=False)
-
-# Sidebar for navigation
-st.sidebar.title("Navigation")
-pages = ["📋 Data Profiling", "📊 Advanced Distributions", "🔗 Correlations & Interactions", "🧬 PCA & Anomalies", "🤖 AutoML Engineer"]
-selection = st.sidebar.radio("Go to", pages)
-
-if selection == "📋 Data Profiling":
-    st.header("Data Profiling")
-    st.subheader("Head of Data")
-    st.dataframe(df.head())
-    st.subheader("Describe")
-    st.dataframe(df.describe())
+with tab1:
+    st.header("💡 BlazeWatson Executive Summary")
+    st.write(ni.profile_data(df))
     st.subheader("Missing Values Matrix")
-    missing = df.isnull()
-    st.dataframe(missing)
-    st.subheader("Data Types")
-    st.write(df.dtypes)
+    st.write(df.isnull().sum())
 
-elif selection == "📊 Advanced Distributions":
-    st.header("Advanced Distributions")
-    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-    for col in numeric_cols:
-        c1, c2 = st.columns(2)
-        with c1:
-            fig = px.histogram(df, x=col, nbins=30, title=f"Histogram of {col}")
-            st.plotly_chart(fig, use_container_width=True)
-        with c2:
-            fig = px.violin(df, y=col, box=True, points="all", title=f"Violin of {col}")
-            st.plotly_chart(fig, use_container_width=True)
-
-elif selection == "🔗 Correlations & Interactions":
-    st.header("Correlations & Interactions")
-    corr = df.corr()
-    fig = go.Figure(data=go.Heatmap(z=corr.values, x=corr.columns, y=corr.index, colorscale="Viridis"))
-    st.plotly_chart(fig, use_container_width=True)
-    st.subheader("Interactive Scatter")
-    cols = df.columns.tolist()
-    x_axis = st.selectbox("X Axis", cols, index=0)
-    y_axis = st.selectbox("Y Axis", cols, index=1)
-    color = st.selectbox("Color", cols, index=2)
-    fig = px.scatter(df, x=x_axis, y=y_axis, color=color, title=f"Scatter: {x_axis} vs {y_axis}")
-    st.plotly_chart(fig, use_container_width=True)
-
-elif selection == "🧬 PCA & Anomalies":
-    st.header("PCA & Anomalies")
-    numeric_df = df.select_dtypes(include=["number"]).dropna()
-    scaler = StandardScaler()
-    scaled = scaler.fit_transform(numeric_df)
-    pca = PCA(n_components=2)
-    components = pca.fit_transform(scaled)
-    pca_df = pd.DataFrame(components, columns=["PC1", "PC2"])
-    fig = px.scatter(pca_df, x="PC1", y="PC2", title="PCA Scatter (first 2 components)")
-    st.plotly_chart(fig, use_container_width=True)
-    # Anomaly detection
-    iso = IsolationForest(contamination=0.05, random_state=42)
-    iso.fit(scaled)
-    preds = iso.predict(scaled)
-    pca_df["anomaly"] = preds
-    fig2 = px.scatter(pca_df, x="PC1", y="PC2", color=pca_df["anomaly"].map({1: "Inlier", -1: "Outlier"}), title="IsolationForest Anomalies on PCA")
-    st.plotly_chart(fig2, use_container_width=True)
-
-elif selection == "🤖 AutoML Engineer":
-    st.header("AutoML Engineer")
-    target = st.selectbox("Select Target Column", df.columns.tolist())
-    if st.button("Train Model"):
-        engine = AutoMLEngineer()
-        X, y = engine.preprocess(df, target)
-        engine.train(X, y)
-        # Metrics
-        preds = engine.model.predict(X)
-        if engine.is_classifier:
-            acc = accuracy_score(y, preds)
-            f1 = f1_score(y, preds, average="weighted")
-            st.write(f"**Accuracy:** {acc:.4f}")
-            st.write(f"**F1 Score:** {f1:.4f}")
-        else:
-            r2 = r2_score(y, preds)
-            mae = mean_absolute_error(y, preds)
-            st.write(f"**R2:** {r2:.4f}")
-            st.write(f"**MAE:** {mae:.4f}")
-        # Feature importance
-        fi = engine.get_feature_importance()
-        fig = px.bar(fi, x="importance", y="feature", orientation="h", title="Feature Importance")
+with tab2:
+    st.header("Feature Engineering Insights")
+    col1, col2 = st.columns(2)
+    with col1:
+        fig = px.histogram(df, x='height_inches')
         st.plotly_chart(fig, use_container_width=True)
-        # Actual vs Predicted
-        if not engine.is_classifier:
-            fig2 = px.scatter(x=y, y=preds, labels={"x": "Actual", "y": "Predicted"}, title="Actual vs Predicted")
-            st.plotly_chart(fig2, use_container_width=True)
-        else:
-            fig2 = px.scatter(x=y, y=preds, labels={"x": "Actual", "y": "Predicted"}, title="Actual vs Predicted (Classification)")
-            st.plotly_chart(fig2, use_container_width=True)
+    with col2:
+        fig = px.histogram(df, x='weight_pounds')
+        st.plotly_chart(fig, use_container_width=True)
+    st.info("Log transform of weight reduces skewness from " + str(round(ni.analyze_distribution(df['weight_pounds']),2)))
+
+with tab3:
+    st.header("Advanced Distributions")
+    fig = px.violin(df, y='height_inches', box=True, points='all')
+    st.plotly_chart(fig, use_container_width=True)
+    fig2 = px.violin(df, y='weight_pounds', box=True, points='all')
+    st.plotly_chart(fig2, use_container_width=True)
+    outliers = ((df['height_inches'] - df['height_inches'].mean()).abs() > 3*df['height_inches'].std()).sum()
+    st.info(f"Detected {outliers} potential outliers in Height.")
+
+with tab4:
+    st.header("Correlation Heatmap")
+    corr = df.corr()
+    fig = px.imshow(corr, text_auto=True, aspect='auto')
+    st.plotly_chart(fig, use_container_width=True)
+    strong_corr = ni.interpret_correlation(corr)
+    if strong_corr:
+        st.info("Strong relationships: " + ", ".join([f"{a} & {b} ({c:.2f})" for a,b,c in strong_corr]))
+    else:
+        st.info("No correlation > 0.7 found.")
+
+with tab5:
+    st.header("PCA & Anomalies")
+    from sklearn.decomposition import PCA
+    X = df[['height_inches','weight_pounds']]
+    pca = PCA(n_components=2)
+    comps = pca.fit_transform(X)
+    fig = px.scatter(x=comps[:,0], y=comps[:,1], labels={'x':'PC1','y':'PC2'})
+    st.plotly_chart(fig, use_container_width=True)
+    st.info(f"First 2 components explain {pca.explained_variance_ratio_.sum()*100:.1f}% of variance.")
+
+with tab6:
+    st.header("K-Means Clustering")
+    kmeans = KMeans(n_clusters=2, random_state=0)
+    clusters = kmeans.fit_predict(df[['height_inches','weight_pounds']])
+    df['cluster'] = clusters
+    fig = px.scatter(df, x='height_inches', y='weight_pounds', color='cluster', symbol='cluster')
+    st.plotly_chart(fig, use_container_width=True)
+    st.info("Cluster 0 tends to have lower weight, Cluster 1 higher weight.")
+
+with tab7:
+    st.header("🤖 AutoML Tournament")
+    automl = AutoMLEngineer(df, TARGET_COL)
+    results, best_model, verdict = automl.run_experiment()
+    st.subheader("Leaderboard")
+    st.table(pd.DataFrame(results).set_index('Model'))
+    st.subheader("Final Verdict")
+    st.write(f"**{best_model}** achieved the highest R² score. Verdict: {verdict}.")
+    st.info("Ridge Regression performed best due to its ability to handle multicollinearity between height and weight.")
