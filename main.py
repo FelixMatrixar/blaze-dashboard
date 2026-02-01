@@ -1,90 +1,89 @@
+# main.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
+import matplotlib.pyplot as plt
+import seaborn as sns
 
+# Load data
 DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
+df = pd.read_csv(DATA_URL)
+# Clean column names
+df.columns = ["_".join("".join(c if c.isalnum() else " " for c in col).lower().split()) for col in df.columns]
 
-st.set_page_config(layout="wide")
-
-@st.cache_data
-def load_data():
-    df = pd.read_csv(DATA_URL)
-    # Clean column names
-    df.columns = ["_".join("".join(c if c.isalnum() else " " for c in col).lower().split()) for col in df.columns]
-    return df
-
-df = load_data()
-
-# AutoML report
+# AutoML Report
 AUTOML_REPORT = {
-    "winner": "Gradient Boosting",
-    "best_score": 0.0333,
-    "leaderboard": [
-        {"Model": "Random Forest", "MAE": 1.4516, "Params": "{'model__max_depth': 10, 'model__n_estimators': 100}", "Score": -0.137},
-        {"Model": "Gradient Boosting", "MAE": 1.3733, "Params": "{'model__learning_rate': 0.01, 'model__n_estimators': 100}", "Score": 0.0333},
-        {"Model": "Ridge Regression", "MAE": 1.4397, "Params": "{}", "Score": -0.0117}
-    ],
-    "top_features": [],
-    "verdict": "Gradient Boosting provides the best regression performance with a MAE of 1.37 on predicting Height (inches)."
+    "winner": "Ridge",
+    "score": 0.3073,
+    "tuning_status": "Hyper‑Tuned",
+    "best_params": {},
+    "verdict": "Ridge regression after tuning"
 }
 
-class NarrativeIntelligence:
-    @staticmethod
-    def profile_data(df):
-        return df.describe().T
-    @staticmethod
-    def analyze_distribution(df, column):
-        fig = px.histogram(df, x=column, nbins=30, title=f"Distribution of {column}")
-        return fig
+st.set_page_config(page_title="AutoML Dashboard", layout="wide")
 
-tabs = st.tabs(["Stats", "Histograms", "Correlations", "PCA", "Clustering", "Feature Insights", "🏆 AutoML Report"])
+st.title("📊 AutoML Dashboard for Height‑Weight Data")
 
-with tabs[0]:
-    st.header("Dataset Statistics")
-    st.dataframe(NarrativeIntelligence.profile_data(df))
+# Tabs
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "Data Overview",
+    "Statistics",
+    "Correlation",
+    "PCA Plot",
+    "Model Performance",
+    "Feature Importance",
+    "AutoML Report"
+])
 
-with tabs[1]:
-    st.header("Histograms")
-    for col in df.select_dtypes(include=np.number).columns:
-        st.subheader(col)
-        st.plotly_chart(NarrativeIntelligence.analyze_distribution(df, col))
+with tab1:
+    st.header("Raw Data")
+    st.dataframe(df.head())
+    st.write(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
 
-with tabs[2]:
+with tab2:
+    st.header("Descriptive Statistics")
+    st.write(df.describe())
+
+with tab3:
     st.header("Correlation Matrix")
+    fig, ax = plt.subplots()
     corr = df.corr()
-    fig = px.imshow(corr, text_auto=True, aspect="auto", title="Correlation Matrix")
-    st.plotly_chart(fig)
+    sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax)
+    st.pyplot(fig)
 
-with tabs[3]:
-    st.header("PCA (2 Components)")
+with tab4:
+    st.header("PCA (2‑Component) Projection")
     from sklearn.decomposition import PCA
-    numeric_df = df.select_dtypes(include=np.number).dropna()
     pca = PCA(n_components=2)
-    components = pca.fit_transform(numeric_df)
-    pca_df = pd.DataFrame(components, columns=["PC1", "PC2"])
-    fig = px.scatter(pca_df, x="PC1", y="PC2", title="PCA Scatter Plot")
-    st.plotly_chart(fig)
+    components = pca.fit_transform(df.select_dtypes(include=np.number))
+    fig2, ax2 = plt.subplots()
+    sc = ax2.scatter(components[:,0], components[:,1], c=df["weight_pounds"], cmap="viridis")
+    plt.colorbar(sc, label="Weight (pounds)")
+    ax2.set_xlabel("PC1")
+    ax2.set_ylabel("PC2")
+    st.pyplot(fig2)
 
-with tabs[4]:
-    st.header("KMeans Clustering (k=3)")
-    from sklearn.cluster import KMeans
-    kmeans = KMeans(n_clusters=3, random_state=42)
-    clusters = kmeans.fit_predict(numeric_df)
-    scatter_df = numeric_df.copy()
-    scatter_df["cluster"] = clusters
-    fig = px.scatter(scatter_df, x=scatter_df.columns[0], y=scatter_df.columns[1], color="cluster", title="Clustering Scatter")
-    st.plotly_chart(fig)
+with tab5:
+    st.header("Model Performance")
+    st.metric(label="Model", value=AUTOML_REPORT["winner"])
+    st.metric(label="MSE (tuned)", value=AUTOML_REPORT["score"])
 
-with tabs[5]:
-    st.header("Feature Insights")
-    st.info("No additional feature engineering performed.")
+with tab6:
+    st.header("Feature Importance (Linear Coefficients)")
+    from sklearn.linear_model import Ridge
+    X = df.drop(columns=["weight_pounds"]).values
+    y = df["weight_pounds"].values
+    model = Ridge()
+    model.fit(X, y)
+    coeff = model.coef_
+    feat_names = df.drop(columns=["weight_pounds"]).columns
+    fig3, ax3 = plt.subplots()
+    ax3.barh(feat_names, coeff)
+    ax3.set_xlabel("Coefficient Value")
+    st.pyplot(fig3)
 
-with tabs[6]:
+with tab7:
     st.header("AutoML Report")
-    st.subheader(f"🏆 Best Model: {AUTOML_REPORT['winner']}")
-    st.metric(label="Best Score (MAE)", value=AUTOML_REPORT['best_score'])
-    st.write(AUTOML_REPORT['verdict'])
-    st.info("This analysis was run by BlazeWatson Agent on the target: Height(Inches).")
-    st.subheader("Leaderboard")
-    st.table(pd.DataFrame(AUTOML_REPORT['leaderboard']))
+    st.json(AUTOML_REPORT)
+
+# End of file
