@@ -1,17 +1,13 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from ibm_watsonx_ai.foundation_models import ModelInference
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # Configuration
 st.set_page_config(layout="wide")
 
-# Dataset URL (hardcoded)
-DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
-
 # Load data
+DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
 df = pd.read_csv(DATA_URL)
 
 # Aggressive sanitization: Keep only letters, numbers, and underscores
@@ -20,52 +16,59 @@ df.columns = [
     for col in df.columns
 ]
 
-# Authentication
-api_key = st.secrets.get("IBM_API_KEY") or st.sidebar.text_input("IBM API Key", type="password")
-project_id = st.secrets.get("IBM_PROJECT_ID") or st.sidebar.text_input("IBM Project ID")
-ibm_url = "https://api.eu-gb.watson-orchestrate.cloud.ibm.com/instances/b3247552-26de-498f-a5d5-545480fbda22"
+# Watsonx AI placeholder (credentials should be set in Streamlit secrets)
+def call_watsonx(prompt: str) -> str:
+    import json
+    from ibm_watsonx_ai import Credentials, ModelInference
+    credentials = Credentials(
+        url="https://eu-gb.ml.cloud.ibm.com",
+        apikey=st.secrets["watsonx"]["apikey"],
+        instance_id=st.secrets["watsonx"]["instance_id"],
+        project_id=st.secrets["watsonx"]["project_id"]
+    )
+    model_id = "meta-llama/llama-2-70b-chat"
+    model_params = {"decoding_method": "greedy", "max_new_tokens": 200}
+    model = ModelInference(
+        model_id=model_id,
+        params=model_params,
+        credentials=credentials,
+        project_id=st.secrets["watsonx"]["project_id"],
+    )
+    response = model.generate(prompt)
+    return response.get("results", [{}])[0].get("generated_text", "")
 
 # Tabs
-tab1, tab2 = st.tabs(["📊 Dashboard", "🧠 Context-Aware Analyst"])
+tab1, tab2 = st.tabs(["📊 Dashboard", "🧠 Analyst"])
 
 with tab1:
-    st.header("Dataset Overview")
-    st.dataframe(df)
-    num_cols = df.select_dtypes(include=np.number).columns
-    if len(num_cols) >= 2:
+    st.header("Scatter Matrix & Correlation Heatmap")
+    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    if len(numeric_cols) >= 2:
+        # Scatter matrix
         st.subheader("Scatter Matrix")
-        fig = px.scatter_matrix(df, dimensions=num_cols)
-        st.plotly_chart(fig, use_container_width=True)
+        fig = sns.pairplot(df[numeric_cols])
+        st.pyplot(fig)
+        # Heatmap
         st.subheader("Correlation Heatmap")
-        corr = df[num_cols].corr()
-        heatmap = go.Figure(data=go.Heatmap(z=corr.values, x=corr.columns, y=corr.index, colorscale='Viridis'))
-        st.plotly_chart(heatmap, use_container_width=True)
+        corr = df[numeric_cols].corr()
+        fig2, ax2 = plt.subplots()
+        sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax2)
+        st.pyplot(fig2)
     else:
-        st.info("Not enough numeric columns for visualizations.")
+        st.write("Not enough numeric columns for visualizations.")
 
 with tab2:
-    st.header("Ask the Data Analyst")
+    st.header("Data Analyst Chat")
     if "messages" not in st.session_state:
-        st.session_state.messages = [{
-            "role": "system",
-            "content": (
-                "You are a helpful Data Analyst. "
-                "You are answering questions about a dataset with the following structure: "
-                "Columns: index, height_inches, weight_pounds. Target: weight_pounds. Rows: 50+."
-            )
-        }]
+        st.session_state.messages = []
+        system_prompt = f"You are an analyst. Use the following dataset summary to answer questions. {"Columns: Index, Height(Inches), Weight(Pounds). Target: Weight(Pounds). Rows: ~50."}"
+        st.session_state.messages.append({"role": "system", "content": system_prompt})
     for msg in st.session_state.messages:
         if msg["role"] != "system":
-            st.chat_message(msg["role"]).write(msg["content"])
-    if prompt := st.chat_input("Ask a question about the data"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        # Call IBM watsonx.ai
-        if api_key and project_id:
-            creds = {"url": ibm_url, "apikey": api_key, "version": "5.0"}
-            model = ModelInference(model_id="ibm/granite-13b-chat-v2", credentials=creds, project_id=project_id)
-            response = model.chat(messages=st.session_state.messages)
-            answer = response.get("generated_text", "")
-        else:
-            answer = "IBM credentials not provided."
-        st.session_state.messages.append({"role": "assistant", "content": answer})
-        st.chat_message("assistant").write(answer)
+            st.chat_message(msg["role"]).write(msg["content"])  # type: ignore
+    if user_input := st.chat_input("Ask a question about the data"):
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.spinner("Thinking..."):
+            response = call_watsonx(user_input)
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        st.chat_message("assistant").write(response)
