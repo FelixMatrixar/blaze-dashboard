@@ -1,54 +1,52 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import requests
 
-st.set_page_config(layout="wide")
-
+# Load data
 DATASET_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
-df = pd.read_csv(DATASET_URL)
-# Clean column names
-df.columns = [c.strip().replace('"','').replace(' ', '_') for c in df.columns]
+@st.cache_data
+def load_data(url):
+    df = pd.read_csv(url)
+    # Clean column names
+    df.columns = df.columns.str.replace(r'[^\w]', '_', regex=True).str.lower()
+    return df
 
-# Secret management
-if "IBM_API_KEY" in st.secrets:
-    ibm_api_key = st.secrets["IBM_API_KEY"]
-else:
-    ibm_api_key = st.sidebar.text_input("Enter IBM API Key", type="password")
+df = load_data(DATASET_URL)
 
-tab1, tab2 = st.tabs(["📊 Dashboard", "🤖 AI Analyst"])
+st.title("Universal Crash‑Proof Dashboard")
 
-with tab1:
-    st.title("Height vs Weight Dashboard")
+# Identify column types
+num_cols = df.select_dtypes(include=np.number).columns.tolist()
+obj_cols = df.select_dtypes(include='object').columns.tolist()
+
+# KPI Row
+if len(num_cols) > 0:
+    primary_col = num_cols[0]
     col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Mean Height (in)", f"{df.Height_Inches.mean():.2f}")
-        st.metric("Mean Weight (lb)", f"{df.Weight_Pounds.mean():.2f}")
-    with col2:
-        st.metric("Min Height", f"{df.Height_Inches.min():.2f}")
-        st.metric("Max Height", f"{df.Height_Inches.max():.2f}")
-    fig_scatter = px.scatter(df, x="Height_Inches", y="Weight_Pounds", trendline="ols", title="Height vs Weight")
-    st.plotly_chart(fig_scatter, use_container_width=True)
-    fig_heat = px.density_heatmap(df, x="Height_Inches", y="Weight_Pounds", nbinsx=30, nbinsy=30, title="Density Heatmap")
-    st.plotly_chart(fig_heat, use_container_width=True)
-    st.dataframe(df)
+    col1.metric("Mean", f"{df[primary_col].mean():.2f}")
+    col2.metric("Max", f"{df[primary_col].max():.2f}")
 
-with tab2:
-    st.header("🤖 AI Analyst")
-    prompt = st.chat_input("Ask a question about the data...")
-    if prompt:
-        if ibm_api_key:
-            url = "https://api.eu-gb.watson-orchestrate.cloud.ibm.com/instances/b3247552-26de-498f-a5d5-545480fbda22/v1/assistants/chat"
-            headers = {"Authorization": f"Bearer {ibm_api_key}", "Content-Type": "application/json"}
-            payload = {"input": {"text": prompt}}
-            try:
-                response = requests.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                answer = data.get('output', {}).get('generic', [{}])[0].get('text', str(data))
-            except Exception as e:
-                answer = f"Error calling Watsonx: {e}"
-        else:
-            answer = "⚠️ API Key missing. Please provide it in the sidebar or Streamlit secrets."
-        st.write(f"**You:** {prompt}")
-        st.write(f"**AI:** {answer}")
+# Charts
+if len(num_cols) >= 2:
+    fig = px.scatter(df, x=num_cols[0], y=num_cols[1], trendline='ols',
+                     title=f"{num_cols[0]} vs {num_cols[1]}")
+    st.plotly_chart(fig)
+elif len(num_cols) == 1:
+    fig = px.histogram(df, x=num_cols[0], title=f"Distribution of {num_cols[0]}")
+    st.plotly_chart(fig)
+
+# Correlation heatmap if enough numeric cols
+if len(num_cols) > 1:
+    corr = df[num_cols].corr()
+    fig_corr = px.imshow(corr, text_auto=True, aspect='auto', title="Correlation Heatmap")
+    st.plotly_chart(fig_corr)
+
+# Dataframe preview
+st.subheader("Data Preview")
+st.dataframe(df.head())
+
+# Placeholder for Watsonx Orchestrate chatbot integration
+st.subheader("Chatbot (Coming Soon)")
+st.write("Integrate IBM watsonx Orchestrate via API key from st.secrets or sidebar.")
