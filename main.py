@@ -1,56 +1,74 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import requests
+from ibm_watsonx_ai import ModelInference
 
-# Load data
-DATASET_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
-@st.cache_data
-def load_data(url):
-    df = pd.read_csv(url)
-    df.columns = df.columns.str.replace(r'[^\w]', '_', regex=True).str.lower()
-    return df
+st.set_page_config(layout="wide")
+DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
+df = pd.read_csv(DATA_URL)
+# Clean column names
+df.columns = df.columns.str.replace(r'[^\w]', '_', regex=True).str.lower()
 
-df = load_data(DATASET_URL)
+# DATA_SUMMARY
+DATA_SUMMARY = "Columns: index, height_inches, weight_pounds. Rows: 200."
 
-st.title("Universal Crash‑Proof Dashboard")
-
-# Identify column types
-num_cols = df.select_dtypes(include=np.number).columns.tolist()
-obj_cols = df.select_dtypes(include='object').columns.tolist()
-
-# KPI Row
-if len(num_cols) > 0:
-    primary_col = num_cols[0]
-    col1, col2 = st.columns(2)
-    col1.metric("Mean", f"{df[primary_col].mean():.2f}")
-    col2.metric("Max", f"{df[primary_col].max():.2f}")
-
-# Charts
-if len(num_cols) >= 2:
-    fig = px.scatter(df, x=num_cols[0], y=num_cols[1], trendline='ols', title=f"{num_cols[0]} vs {num_cols[1]}")
-    st.plotly_chart(fig)
-elif len(num_cols) == 1:
-    fig = px.histogram(df, x=num_cols[0], title=f"Distribution of {num_cols[0]}")
-    st.plotly_chart(fig)
-
-# Correlation heatmap if enough numeric cols
-if len(num_cols) > 1:
-    corr = df[num_cols].corr()
-    fig_heat = px.imshow(corr, text_auto=True, title="Correlation Heatmap")
-    st.plotly_chart(fig_heat)
-
-# Show dataframe
-st.subheader("Data Preview")
-st.dataframe(df.head())
-
-# Placeholder for Watsonx chatbot (requires API key in st.secrets or sidebar)
-st.sidebar.header("Watsonx Chatbot")
-api_key = st.secrets.get("watsonx_api_key", None)
-if not api_key:
-    api_key = st.sidebar.text_input("Enter Watsonx API Key", type="password")
-if api_key:
-    st.sidebar.success("API key provided. Chatbot ready (implementation omitted).")
+# Authentication
+if "IBM_API_KEY" in st.secrets:
+    api_key = st.secrets["IBM_API_KEY"]
 else:
-    st.sidebar.info("Provide an API key to enable chatbot.")
+    api_key = st.sidebar.text_input("Watsonx API Key", type="password")
+
+if "IBM_PROJECT_ID" in st.secrets:
+    project_id = st.secrets["IBM_PROJECT_ID"]
+else:
+    project_id = st.sidebar.text_input("Watsonx Project ID", type="password")
+
+model_id = st.sidebar.selectbox("Model", ["ibm/granite-13b-chat-v2", "meta-llama/llama-3-70b-instruct"])  # type: ignore
+
+# Tabs
+tab1, tab2 = st.tabs(["Dashboard", "🧠 Context-Aware Analyst"])
+
+with tab1:
+    st.header("Exploratory Data Analysis")
+    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
+    if numeric_cols:
+        for col in numeric_cols:
+            fig = px.histogram(df, x=col, title=f"Distribution of {col}")
+            st.plotly_chart(fig, use_container_width=True)
+        if len(numeric_cols) >= 2:
+            x_col = st.selectbox("X axis", numeric_cols, index=0)
+            y_col = st.selectbox("Y axis", numeric_cols, index=1)
+            fig_scatter = px.scatter(df, x=x_col, y=y_col, trendline="ols")
+            st.plotly_chart(fig_scatter, use_container_width=True)
+    else:
+        st.write("No numeric columns found.")
+
+with tab2:
+    st.header("Chat with Data Analyst")
+    if "messages" not in st.session_state:
+        st.session_state.messages = [{"role": "system", "content": f"You are a Data Analyst. Answer based on this dataset structure: {DATA_SUMMARY}"}]
+    for msg in st.session_state.messages:
+        if msg["role"] != "system":
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+    if api_key and project_id:
+        prompt = st.chat_input("Ask a question about the data...")
+        if prompt:
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.write(prompt)
+            # Call Watsonx AI
+            model = ModelInference(
+                model_id=model_id,
+                credentials={"url": "https://us-south.ml.cloud.ibm.com", "apikey": api_key},
+                project_id=project_id,
+            )
+            response = model.chat(messages=st.session_state.messages)
+            answer = response.get("result", {}).get("generated_text", "")
+            st.session_state.messages.append({"role": "assistant", "content": answer})
+            with st.chat_message("assistant"):
+                st.write(answer)
+    else:
+        st.warning("Please provide IBM API Key and Project ID in the sidebar or secrets.")
