@@ -1,6 +1,5 @@
 streamlit
 pandas
-numpy
-plotly
+seaborn
+matplotlib
 ibm-watsonx-ai
-statsmodels
