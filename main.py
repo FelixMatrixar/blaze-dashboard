@@ -1,44 +1,47 @@
+# main/main.py
 import streamlit as st
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+from ibm_watsonx_ai.foundation_models import ModelInference
 
-# ---- Secrets ----
+# ---------------------------------------------------
+# Configuration
+# ---------------------------------------------------
+st.set_page_config(layout="wide")
+
+# ---------------------------------------------------
+# Secrets handling
+# ---------------------------------------------------
 api_key = st.secrets.get("IBM_API_KEY")
 ibm_url = st.secrets.get("IBM_URL")
 ibm_project_id = st.secrets.get("IBM_PROJECT_ID")
 
-# Fallbacks (if secrets missing)
+# Fallback values (only used if secrets are missing)
 if not api_key:
-    api_key = st.sidebar.text_input("IBM API Key", type="password")
+    api_key = "YOUR_API_KEY"
 if not ibm_url:
-    ibm_url = st.sidebar.text_input("IBM URL")
+    ibm_url = "https://us-south.ml.cloud.ibm.com"
 if not ibm_project_id:
-    ibm_project_id = st.sidebar.text_input("IBM Project ID")
+    ibm_project_id = "YOUR_PROJECT_ID"
 
-# ---- Page Config ----
-st.set_page_config(layout="wide")
-
-# ---- Load Data ----
+# ---------------------------------------------------
+# Load data
+# ---------------------------------------------------
 DATA_URL = "https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv"
-@st.cache_data
+df = pd.read_csv(DATA_URL)
 
-def load_data(url):
-    df = pd.read_csv(url)
-    # Aggressive sanitization: Keep only letters, numbers, and underscores
-    df.columns = [
-        "".join(c for c in col if c.isalnum() or c == " ").strip().replace(" ", "_").lower()
-        for col in df.columns
-    ]
-    return df
+# ---------------------------------------------------
+# Column sanitization (mandatory)
+# ---------------------------------------------------
+df.columns = [
+    "".join(c for c in col if c.isalnum() or c == " ").strip().replace(" ", "_").lower()
+    for col in df.columns
+]
 
-df = load_data(DATA_URL)
-
-# ---- DATA_SUMMARY ----
-DATA_SUMMARY = "Columns: index, height_inches, weight_pounds. Target: weight_pounds. Rows: 50+."
-
-# ---- Watsonx Model ----
-from ibm_watsonx_ai.foundation_models import ModelInference
+# ---------------------------------------------------
+# IBM watsonx.ai model initialization
+# ---------------------------------------------------
 model = ModelInference(
     model_id="ibm/granite-13b-chat-v2",
     credentials={
@@ -49,39 +52,49 @@ model = ModelInference(
     project_id=ibm_project_id,
 )
 
-# ---- App Layout ----
-tabs = st.tabs(["📊 Dashboard", "🧠 Analyst"])
+# ---------------------------------------------------
+# Data summary for system prompt
+# ---------------------------------------------------
+DATA_SUMMARY = "Columns: index, height_inches, weight_pounds. Target: weight_pounds. Rows: 50+."
 
-with tabs[0]:
-    st.header("Data Overview")
-    st.dataframe(df)
+# ---------------------------------------------------
+# Streamlit app layout
+# ---------------------------------------------------
+st.title("Human Height & Weight Dashboard")
+
+tab1, tab2 = st.tabs(["📊 Dashboard", "🧠 Analyst"])
+
+with tab1:
+    st.header("Exploratory Data Analysis")
     numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-    if len(numeric_cols) >= 2:
+    if numeric_cols:
         st.subheader("Scatter Matrix")
-        sns.pairplot(df[numeric_cols])
-        st.pyplot(plt.gcf())
+        fig = sns.pairplot(df[numeric_cols])
+        st.pyplot(fig)
+        
         st.subheader("Correlation Heatmap")
         corr = df[numeric_cols].corr()
-        sns.heatmap(corr, annot=True, cmap="coolwarm")
-        st.pyplot(plt.gcf())
+        fig2, ax2 = plt.subplots()
+        sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax2)
+        st.pyplot(fig2)
     else:
-        st.info("Not enough numeric columns for visualizations.")
+        st.write("No numeric columns detected.")
 
-with tabs[1]:
+with tab2:
     st.header("AI Analyst")
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-    user_input = st.chat_input("Ask a question about the dataset...")
+    user_input = st.chat_input("Ask a question about the data...")
     if user_input:
         # Prepare prompt with data summary
-        system_prompt = f"You are an analyst. {DATA_SUMMARY} Use this information to answer user queries."
+        system_prompt = f"You are an analyst. Use the following data summary to answer questions. {DATA_SUMMARY}"
+        # Call Watsonx AI model
         response = model.generate(
             prompt=system_prompt + "\nUser: " + user_input,
             max_new_tokens=300,
-            temperature=0.7,
         )
-        answer = response['results'][0]['generated_text'] if isinstance(response, dict) else str(response)
+        answer = response.get('generated_text', 'No response')
         st.session_state.chat_history.append((user_input, answer))
-    for q, a in st.session_state.chat_history:
-        st.markdown(f"**You:** {q}")
-        st.markdown(f"**AI:** {a}")
+        for q, a in st.session_state.chat_history:
+            st.write(f"**User:** {q}")
+            st.write(f"**Assistant:** {a}")
