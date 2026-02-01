@@ -1,29 +1,40 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 
-data_url = 'https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv'
-df = pd.read_csv(data_url)
+# Load data
+df = pd.read_csv('https://people.sc.fsu.edu/~jburkardt/data/csv/hw_200.csv')
+
 # Clean column names
-df.columns = [col.strip().replace('"','').replace("'",'') for col in df.columns]
-# Header
+df.columns = [col.strip().replace('"', '').replace(' ', '_') for col in df.columns]
+
 st.title('Height & Weight Dashboard')
 st.caption('Powered by BlazeWatson')
-# KPI Row
+
+# KPI metrics
+total_count = len(df)
+avg_height = df['Height(Inches)'].mean()
+avg_weight = df['Weight(Pounds)'].mean()
 col1, col2, col3 = st.columns(3)
-col1.metric('Total Records', len(df))
-col2.metric('Avg Height (in)', f"{df['Height(Inches)'].mean():.2f}")
-col3.metric('Avg Weight (lb)', f"{df['Weight(Pounds)'].mean():.2f}")
-# Correlation Heatmap
-if len(df.select_dtypes(include='number').columns) > 2:
-    corr = df.select_dtypes(include='number').corr()
-    fig = px.imshow(corr, text_auto=True, aspect='auto')
-    st.subheader('Correlation Heatmap')
-    st.plotly_chart(fig, use_container_width=True)
-# Scatter plot Height vs Weight
-fig2 = px.scatter(df, x='Height(Inches)', y='Weight(Pounds)', trendline='ols', title='Height vs Weight')
-st.plotly_chart(fig2, use_container_width=True)
-# Raw data
+col1.metric('Total Records', total_count)
+col2.metric('Avg Height (in)', f"{avg_height:.2f}")
+col3.metric('Avg Weight (lb)', f"{avg_weight:.2f}")
+
+# Correlation heatmap
+corr = df[['Height(Inches)', 'Weight(Pounds)']].corr()
+fig = px.imshow(corr, text_auto=True, aspect='auto')
+st.plotly_chart(fig)
+
+# Histograms
+fig_h = px.histogram(df, x='Height(Inches)', nbins=20, title='Height Distribution')
+fig_w = px.histogram(df, x='Weight(Pounds)', nbins=20, title='Weight Distribution')
+st.plotly_chart(fig_h)
+st.plotly_chart(fig_w)
+
+# Scatter plot
+fig_scatter = px.scatter(df, x='Height(Inches)', y='Weight(Pounds)', trendline='ols', title='Height vs Weight')
+st.plotly_chart(fig_scatter)
+
+# Show raw data
 st.subheader('Raw Data')
 st.dataframe(df)
